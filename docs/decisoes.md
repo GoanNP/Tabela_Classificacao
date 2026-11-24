@@ -209,3 +209,193 @@ criarPartida
 Essa função poderia impedir gols negativos, rodadas inválidas, nomes vazios e partidas de um time contra ele mesmo.
 
 Nesta camada, foi mantida a estrutura solicitada no enunciado, priorizando simplicidade, legibilidade e compatibilidade com as próximas etapas.
+
+
+# Decisões estruturais da Camada 2
+ 
+## 1. Módulo `Classificacao`
+ 
+A Camada 2 foi colocada em um módulo próprio, `Classificacao.hs`, que importa `Tipos`.
+ 
+Assim, cada camada fica em um arquivo separado: `Tipos` define os dados e as funções básicas sobre uma partida, e `Classificacao` calcula a tabela e as estatísticas a partir de uma lista de partidas.
+ 
+O módulo exporta somente as funções pedidas no enunciado. As funções auxiliares (`linhaVazia`, `acumular`, `contar`, `criterioTabela`, `diferenca` e `golsNaPartida`) ficam internas.
+ 
+---
+ 
+## 2. Funções de ordem superior em vez de recursão explícita
+ 
+O enunciado proíbe recursão explícita nesta camada. Todas as funções usam padrões de recursão já nomeados:
+ 
+| Recurso exigido | Onde é usado |
+|---|---|
+| `map` | `classificacao`, `mediaGols` |
+| `filter` | `linhaDoTime`, `ateRodada` |
+| dobra (`foldl`) | `linhaDoTime`, `maiorGoleada` |
+| composição `(.)` | `ateRodada`, `criterioTabela` |
+| `sortBy` com `comparing` e `Down` | `classificacao` |
+ 
+Usar a função com nome mostra, já na leitura, o que é feito com a lista: `filter` seleciona, `map` transforma, `foldl` acumula e `sortBy` ordena.
+ 
+---
+ 
+## 3. Função `pontos`
+ 
+```haskell
+pontos :: Resultado -> Int
+pontos Vitoria = 3
+pontos Empate  = 1
+pontos Derrota = 0
+```
+ 
+A função usa casamento de padrões sobre o tipo soma `Resultado`. Como os três construtores são tratados, o `-Wall` não emite aviso de padrões incompletos.
+ 
+Essa é a única função que conhece o valor de cada resultado. `pontosLinha` e `aproveitamento` reutilizam `pontos`; assim, se a regra de pontuação mudar, só esta função precisa ser alterada.
+ 
+---
+ 
+## 4. Função `linhaDoTime`
+ 
+```haskell
+linhaDoTime :: [Partida] -> Time -> Linha
+linhaDoTime partidas time =
+  foldl (acumular time) (linhaVazia time) (filter (participou time) partidas)
+```
+ 
+A linha é construída em duas etapas:
+ 
+1. `filter (participou time)` mantém somente as partidas do time;
+2. `foldl` parte de `linhaVazia time`, com todos os campos zerados, e aplica `acumular` a cada partida.
+`acumular` utiliza `resultadoPara`, da Camada 1, para descobrir o resultado e soma 1 ao contador correspondente por meio do auxiliar `contar :: Bool -> Int`. Os gols feitos e sofridos dependem de o time ser mandante ou visitante.
+ 
+O caso `Nothing` de `resultadoPara` devolve a linha sem alteração. Por causa do `filter`, ele nunca ocorre na prática, mas precisa estar presente para que o `case` seja exaustivo.
+ 
+`foldl` foi escolhido porque a linha é acumulada da esquerda para a direita, partida a partida, como uma tabela é atualizada ao longo do campeonato. Uma lista vazia resulta na própria `linhaVazia`, sem nenhum caso especial.
+ 
+---
+ 
+## 5. Funções `pontosLinha` e `saldo`
+ 
+```haskell
+pontosLinha :: Linha -> Int
+saldo       :: Linha -> Int
+```
+ 
+Pontos e saldo não foram adicionados como campos de `Linha`, mas calculados a partir dos campos existentes.
+ 
+Se fossem campos, seria possível construir uma linha em que os pontos não correspondem às vitórias e aos empates. Calculados, eles são sempre coerentes com o restante da linha.
+ 
+---
+ 
+## 6. Função `aproveitamento`
+ 
+```haskell
+aproveitamento :: Linha -> Double
+aproveitamento linha
+  | disputados == 0 = 0
+  | otherwise       = 100 * fromIntegral (pontosLinha linha) / fromIntegral disputados
+  where
+    disputados = pontos Vitoria * jogos linha
+```
+ 
+O resultado é um percentual, entre 0 e 100.
+ 
+Haskell não converte tipos numéricos automaticamente: `div` trunca o resultado, e `/` exige um tipo fracionário. Por isso, os dois `Int` são convertidos com `fromIntegral` antes da divisão. Com `div`, um empate em um jogo daria 0% em vez de 33,33%.
+ 
+A guarda `disputados == 0` trata o time que não jogou. Sem ela, a divisão 0 / 0 em `Double` resultaria em `NaN`.
+ 
+---
+ 
+## 7. Função `classificacao`
+ 
+```haskell
+classificacao :: [Partida] -> [Linha]
+classificacao partidas =
+  sortBy criterioTabela (map (linhaDoTime partidas) (times partidas))
+ 
+criterioTabela :: Linha -> Linha -> Ordering
+criterioTabela =
+     comparing (Down . pontosLinha)
+  <> comparing (Down . vitorias)
+  <> comparing (Down . saldo)
+  <> comparing (Down . golsPro)
+  <> comparing timeLinha
+```
+ 
+`map` gera uma linha para cada time, e `sortBy` ordena todas de uma vez.
+ 
+Os critérios de desempate formam uma única função de comparação. Como `Ordering` é um `Monoid`, o operador `<>` só passa para o critério seguinte quando o anterior resulta em `EQ`.
+ 
+Encadear vários `sortBy`, um para cada critério, seria frágil: o resultado dependeria da ordem das chamadas e da estabilidade da ordenação. Com uma única comparação, a prioridade dos critérios aparece diretamente no código.
+ 
+`Down` inverte a ordem dos critérios em que o maior valor fica à frente. O nome do time, em ordem alfabética, é o último critério e garante que a tabela tenha sempre uma ordem única, mesmo quando todos os outros critérios empatam.
+ 
+---
+ 
+## 8. Função `ateRodada`
+ 
+```haskell
+ateRodada :: Int -> [Partida] -> [Partida]
+ateRodada n = filter ((<= n) . rodada)
+```
+ 
+A função compõe `rodada` com a seção `(<= n)` e utiliza o resultado como predicado do `filter`. A rodada informada é incluída.
+ 
+`ateRodada` apenas seleciona partidas e não calcula nada. A tabela em um momento intermediário é obtida pela composição das duas funções:
+ 
+```haskell
+classificacao (ateRodada 3 campeonatoTeste)
+```
+ 
+Rodadas fora do intervalo não geram erro: 0 ou um valor negativo resulta em `[]`, e um valor maior que a última rodada resulta no campeonato inteiro.
+ 
+---
+ 
+## 9. Função `maiorGoleada`
+ 
+```haskell
+maiorGoleada :: [Partida] -> Maybe Partida
+maiorGoleada = foldl escolher Nothing
+```
+ 
+`maximumBy` é uma função parcial: gera uma exceção quando recebe uma lista vazia. Por isso, a maior goleada é obtida com `foldl` e um acumulador do tipo `Maybe Partida`.
+ 
+O acumulador começa em `Nothing` e passa a `Just` na primeira partida. Assim, a lista vazia resulta em `Nothing` sem nenhum tratamento adicional.
+ 
+A diferença é calculada com `abs`, de modo que uma goleada do visitante conta da mesma forma que uma do mandante.
+ 
+Em caso de empate na diferença, a comparação estrita (`>`) mantém a primeira partida da lista. No campeonato de teste, Azuriz 0×4 Cascavel (rodada 3) e Coritiba 4×0 Maringá (rodada 5) têm diferença 4, e o resultado é a da rodada 3.
+ 
+---
+ 
+## 10. Função `mediaGols`
+ 
+```haskell
+mediaGols :: [Partida] -> Maybe Double
+mediaGols [] = Nothing
+mediaGols partidas =
+  Just (fromIntegral (sum (map golsNaPartida partidas))
+          / fromIntegral (length partidas))
+```
+ 
+A lista vazia é tratada por casamento de padrões. O segundo caso não chama `mediaGols` novamente; portanto, não há recursão explícita.
+ 
+Como em `aproveitamento`, a soma e a quantidade são convertidas com `fromIntegral` antes da divisão.
+ 
+---
+ 
+## 11. Uso de `Maybe` nas estatísticas
+ 
+`maiorGoleada` e `mediaGols` retornam `Maybe` porque, em um campeonato sem partidas, não existe maior goleada nem média.
+ 
+Com `Maybe`, a ausência de resultado faz parte do tipo, e quem chama a função é obrigado a tratar o caso `Nothing`. Isso evita funções parciais como `head`, `maximum` e `foldr1`, que encerram o programa com uma exceção quando recebem uma lista vazia.
+ 
+`aproveitamento` é diferente: o enunciado define o valor 0 para um time que não jogou. Por isso, ela retorna `Double` diretamente.
+
+## 12. Limitações
+ 
+`classificacao` executa `linhaDoTime` uma vez para cada time, e cada execução percorre todas as partidas. O custo é proporcional ao número de times multiplicado pelo número de partidas, o que é suficiente para o tamanho de um campeonato.
+ 
+A tabela inclui somente os times que aparecem em pelo menos uma partida, porque a lista de times vem de `times`. Um time sem jogos não aparece na classificação.
+ 
+As funções confiam que as partidas são válidas. Gols negativos ou partidas de um time contra ele mesmo, mencionados nas limitações da Camada 1, continuam possíveis e serão tratados na leitura da entrada, na Camada 3.
