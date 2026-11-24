@@ -1,7 +1,17 @@
 module Classificacao
   ( pontos
+  , linhaDoTime
+  , pontosLinha
+  , saldo
+  , aproveitamento
+  , classificacao
+  , ateRodada
+  , maiorGoleada
+  , mediaGols
   ) where
 
+import Data.List (sortBy)
+import Data.Ord (Down (..), comparing)
 import Tipos
 
 pontos :: Resultado -> Int

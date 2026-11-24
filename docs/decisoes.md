@@ -399,3 +399,189 @@ Com `Maybe`, a ausência de resultado faz parte do tipo, e quem chama a função
 A tabela inclui somente os times que aparecem em pelo menos uma partida, porque a lista de times vem de `times`. Um time sem jogos não aparece na classificação.
  
 As funções confiam que as partidas são válidas. Gols negativos ou partidas de um time contra ele mesmo, mencionados nas limitações da Camada 1, continuam possíveis e serão tratados na leitura da entrada, na Camada 3.
+
+# Decisões estruturais da Camada 3
+ 
+## 1. Módulo `Leitura`
+ 
+A Camada 3 foi colocada em `Leitura.hs`, que importa `Tipos` e duas funções de `Classificacao` (`pontosLinha` e `saldo`), usadas na formatação da tabela.
+ 
+O módulo reúne as três responsabilidades da camada: ler o texto, validar as partidas e preparar a saída (a tabela formatada e as mensagens de erro). Todas as suas funções são puras; o único código com IO fica em `Main.hs`.
+ 
+---
+ 
+## 2. Tipo `Erro`
+ 
+```haskell
+data Erro
+  = CamposInvalidos Int Int        -- linha, quantidade de campos encontrada
+  | NumeroInvalido Int String      -- linha, texto que deveria ser um número
+  | PlacarNegativo Int Int         -- linha, quantidade de gols negativa
+  | MesmoTime Int Time             -- linha, time que joga contra si mesmo
+  | TimeRepetidoNaRodada Int Time  -- rodada, time que joga mais de uma vez
+  deriving (Show, Eq)
+```
+ 
+`Erro` é um tipo soma porque cada problema da entrada é um caso diferente. Representar os erros como `String` impediria distinguir um caso do outro nos testes e misturaria a detecção do erro com a forma de exibi-lo.
+ 
+O enunciado exige que cada construtor carregue a linha ou a rodada do problema. Além disso, cada um guarda o dado que causou o erro (o texto que não é número, o placar negativo, o nome do time), para que a mensagem possa dizer exatamente o que está errado.
+ 
+`TimeRepetidoNaRodada` carrega a rodada, e não a linha, porque o problema envolve duas partidas da mesma rodada, e não uma linha isolada.
+ 
+A linha é numerada pelo texto original, a partir de 1, contando também comentários e linhas em branco. Assim, o número informado corresponde ao que a pessoa vê no editor.
+ 
+`Eq` permite comparar diretamente nos testes, por exemplo, `Left (NumeroInvalido 4 "dois")`.
+ 
+---
+ 
+## 3. Função `separar`
+ 
+```haskell
+separar :: Char -> String -> [String]
+separar separador = foldr passo [""]
+```
+ 
+A linha é percorrida com `foldr`, da direita para a esquerda: cada separador abre um novo campo, e os demais caracteres são acrescentados ao campo atual.
+ 
+Campos vazios são mantidos: `"1;;2;0;Athletico"` resulta em cinco campos, com um vazio no meio. Isso deixa a contagem de campos fiel ao texto, o que é necessário para detectar `CamposInvalidos`.
+ 
+O caso `[]` do `case` interno nunca ocorre, porque a dobra começa com `[""]` e só acrescenta campos. Ele está presente para que o padrão seja completo e o `-Wall` não emita aviso.
+ 
+---
+ 
+## 4. Função `lerPartida`
+ 
+```haskell
+lerPartida :: Int -> String -> Either Erro Partida
+lerPartida linha texto = do
+  (r, m, gm, gv, v) <- cincoCampos linha (separar ';' texto)
+  numeroRodada <- lerNumero linha r
+  golsM <- lerNumero linha gm
+  golsV <- lerNumero linha gv
+  if golsM < 0 then Left (PlacarNegativo linha golsM) else Right ()
+  if golsV < 0 then Left (PlacarNegativo linha golsV) else Right ()
+  if m == v then Left (MesmoTime linha m) else Right ()
+  Right (Partida numeroRodada m golsM golsV v)
+```
+ 
+A leitura de uma linha é feita com a notação `do` na mônada `Either`. Cada etapa devolve um `Either`, e o primeiro `Left` interrompe o cálculo e se torna o resultado.
+ 
+Sem a mônada, cada etapa exigiria um `case` sobre o resultado da anterior, formando uma "escadinha" de `case` aninhados. Com `do`, as verificações aparecem em sequência, na ordem em que são feitas: campos, números, placares negativos e mesmo time. Quando uma linha tem vários erros, o informado é o primeiro dessa ordem.
+ 
+As verificações que não produzem valor usam `if ... then Left erro else Right ()`. O `when` de `Control.Monad` faria o mesmo, mas esse módulo não está na lista dos permitidos.
+
+---
+ 
+## 5. Função `lerCampeonato`
+ 
+```haskell
+lerCampeonato :: String -> Either Erro [Partida]
+lerCampeonato texto = do
+  partidas <- traverse (uncurry lerPartida) (linhasRelevantes texto)
+  maybe (Right partidas) Left (listToMaybe (timesRepetidos partidas))
+```
+ 
+A leitura do texto inteiro tem duas etapas:
+ 
+1. `traverse` aplica `lerPartida` a cada linha e para no primeiro `Left`. É a mesma lógica da notação `do`, aplicada a uma lista inteira.
+2. Com todas as partidas lidas, `timesRepetidos` procura times que jogam duas vezes na mesma rodada. `listToMaybe` pega a primeira repetição, se houver, e `maybe` a transforma em `Left` ou devolve `Right partidas`.
+A verificação de repetição só pode ser feita depois da leitura, porque envolve várias partidas ao mesmo tempo. Por isso, um erro de formato em qualquer linha aparece antes de uma repetição.
+ 
+`linhasRelevantes` numera as linhas **antes** de descartar as linhas em branco e os comentários. Assim, o número de cada linha corresponde à sua posição no texto original:
+ 
+```haskell
+linhasRelevantes = filter (relevante . snd) . zip [1 ..] . lines
+```
+ 
+`timesRepetidos` monta a lista de pares (rodada, time), dois por partida, e devolve cada par que já tinha aparecido antes. Como `lerPartida` rejeita um time jogando contra si mesmo, uma repetição sempre envolve duas partidas diferentes.
+ 
+---
+ 
+## 6. Função `todosOsErros`
+ 
+```haskell
+todosOsErros :: String -> [Erro]
+todosOsErros texto = lefts lidas ++ timesRepetidos (rights lidas)
+  where
+    lidas = map (uncurry lerPartida) (linhasRelevantes texto)
+```
+ 
+Enquanto `lerCampeonato` para no primeiro erro, `todosOsErros` produz um relatório completo. Para isso, as linhas são lidas com `map`, e não com `traverse`: cada linha resulta em um `Left` ou um `Right`, sem interromper as demais.
+ 
+`lefts` reúne os erros de linha, na ordem do texto, e `rights` reúne as partidas válidas, nas quais são procurados os times repetidos.
+ 
+As duas funções compartilham `linhasRelevantes` e `timesRepetidos`. Por isso, o primeiro erro de `todosOsErros` é sempre o mesmo erro devolvido por `lerCampeonato`.
+ 
+---
+ 
+## 7. Usos de `Either` e `Maybe` exigidos
+ 
+| Exigência | Onde é atendida |
+|---|---|
+| `readMaybe` em vez de `read` | `lerNumero` |
+| bloco `do` na mônada `Either` | `lerPartida`, `lerCampeonato` |
+| `traverse` ou `mapM` | `lerCampeonato` |
+| `Maybe` como functor ou mônada (`maybe`) | `lerNumero`, `lerCampeonato`, `main` |
+| erro descritivo em `Left`, sem exceção | todas as funções de leitura |
+ 
+---
+ 
+## 8. Função `tabelaFormatada`
+ 
+```haskell
+tabelaFormatada :: [Linha] -> String
+```
+ 
+A função monta a tabela como texto, com posição, time, pontos, jogos, vitórias, empates, derrotas e saldo.
+ 
+O cabeçalho e as linhas usam a mesma função interna, `formatar`, o que garante que as colunas fiquem alinhadas.
+ 
+A coluna do time tem a largura do maior nome. O texto `"Time"`, do cabeçalho, entra na lista passada ao `maximum`; assim, a lista nunca é vazia, mesmo para uma tabela sem linhas, e `maximum` nunca falha.
+ 
+A posição é obtida com `zipWith` e a lista `[1 ..]`, sem contador manual. O saldo positivo é exibido com sinal (`+15`), como nas tabelas de jornal.
+ 
+A função devolve uma `String`, e não imprime nada. Isso permite testá-la comparando o texto produzido.
+ 
+---
+ 
+## 9. Função `descreverErro`
+ 
+```haskell
+descreverErro :: Erro -> String
+```
+ 
+A mensagem de cada erro é produzida por uma função separada, e não guardada dentro do `Erro`. Dessa forma, o tipo representa *o que* deu errado, e a função decide *como* isso é exibido. As mensagens podem mudar sem afetar a validação nem os testes que comparam erros.
+ 
+Cada caso da função trata um construtor; como todos estão presentes, não há aviso de padrões incompletos.
+ 
+---
+ 
+## 10. Função `main`
+ 
+`main` é a única função com IO. Todo o cálculo é feito pelas funções puras das três camadas; `main` apenas obtém os dados e imprime os resultados.
+ 
+Os dados vêm de `dadosCampeonato` e `dadosComErros`, definidos em `Dados.hs`, e não de `getLine`. No playground não há entrada padrão, e separar o núcleo puro da casca de IO torna o programa testável em qualquer ambiente.
+ 
+`main` demonstra as três camadas na sequência pedida pelo enunciado:
+ 
+1. a tabela final;
+2. a tabela após a rodada 3, com `classificacao (ateRodada 3 partidas)`;
+3. as estatísticas da Camada 2: maior goleada, média de gols e aproveitamento de cada time;
+4. o tratamento de uma entrada com erros: o primeiro erro, de `lerCampeonato`, e o relatório completo, de `todosOsErros`.
+Todos os resultados `Either` e `Maybe` são tratados com `case`, `either` e `maybe`. Nenhum caminho termina com exceção.
+
+---
+ 
+## 11. Limitações
+ 
+Por causa da versão curta de `lerPartida`, algumas entradas inválidas são aceitas:
+ 
+- espaços nos nomes contam: `" Coritiba"` e `"Coritiba"` são tratados como times diferentes;
+- `readMaybe` aceita formatos como `"(2)"` e `" 2 "`, que são lidos como 2;
+- rodada 0 ou negativa e nomes vazios não são rejeitados;
+- números maiores que o limite de `Int` não são rejeitados: `readMaybe` devolve um valor incorreto, sem erro.
+Também:
+ 
+- um texto salvo no Windows termina cada linha com `\r`, que `lines` não remove; o caractere ficaria no nome do visitante. Isso não afeta o programa atual, cujos dados estão no próprio código;
+- `timesRepetidos` compara cada par com todos os anteriores, com custo quadrático no número de partidas, o que é suficiente para o tamanho de um campeonato;
+- se um time aparece três vezes na mesma rodada, o relatório mostra dois erros, um para cada aparição a mais.
