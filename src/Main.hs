@@ -5,10 +5,7 @@ import Dados
 import Leitura
 import Tipos
 
--- | A única função com IO. Todo o cálculo é feito pelas funções puras das
--- três camadas; aqui os dados são obtidos e os resultados, impressos.
--- Os dados vêm de Dados.hs, e não de getLine, para que o programa rode
--- em qualquer ambiente, inclusive no playground.
+
 main :: IO ()
 main = do
   case lerCampeonato dadosCampeonato of
