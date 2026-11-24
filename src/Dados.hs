@@ -1,9 +1,7 @@
 module Dados
   ( campeonatoTeste
   , dadosCampeonato
-  , partidaEmpateSemGols
-  , partidaMaiorGoleada
-  , partidaFinalCoritiba
+  , dadosComErros
   ) where
 
 import Tipos
@@ -88,7 +86,6 @@ dadosCampeonato = unlines
   ]
 
 
--- | Entrada com um erro de cada tipo, para demonstrar a validação.
 dadosComErros :: String
 dadosComErros = unlines
   [ "# rodada;mandante;gols mandante;gols visitante;visitante"

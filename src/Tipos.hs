@@ -6,6 +6,8 @@ module Tipos
   , participou
   , resultadoPara
   , times
+  , golsDaPartida
+  , diferencaDeGols
   ) where
 
 import Data.List (nub, sort)
@@ -58,3 +60,11 @@ times :: [Partida] -> [Time]
 times = sort . nub . concatMap nomes
   where
     nomes partida = [mandante partida, visitante partida]
+
+golsDaPartida :: Partida -> Int
+golsDaPartida partida =
+  golsMandante partida + golsVisitante partida
+
+diferencaDeGols :: Partida -> Int
+diferencaDeGols partida =
+  abs (golsMandante partida - golsVisitante partida)

@@ -8,10 +8,11 @@ module Leitura
   , tabelaFormatada
   , descreverErro
   ) where
- 
+
 import Classificacao (pontosLinha, saldo)
 import Data.Char (isSpace)
 import Data.Either (lefts, rights)
+import Data.List (dropWhileEnd)
 import Data.Maybe (listToMaybe)
 import Text.Read (readMaybe)
 import Tipos
@@ -41,10 +42,13 @@ separar separador = foldr passo [""]
 
 lerPartida :: Int -> String -> Either Erro Partida
 lerPartida linha texto = do
-  (r, m, gm, gv, v) <- cincoCampos linha (separar ';' texto)
+  (r, m, gm, gv, v) <- cincoCampos linha (map removerEspacos (separar ';' texto))
   numeroRodada <- lerNumero linha r
   golsM <- lerNumero linha gm
   golsV <- lerNumero linha gv
+  if numeroRodada <= 0 then Left (RodadaInvalida linha numeroRodada) else Right ()
+  if null m then Left (NomeVazio linha) else Right ()
+  if null v then Left (NomeVazio linha) else Right ()
   if golsM < 0 then Left (PlacarNegativo linha golsM) else Right ()
   if golsV < 0 then Left (PlacarNegativo linha golsV) else Right ()
   if m == v then Left (MesmoTime linha m) else Right ()
@@ -57,6 +61,8 @@ cincoCampos linha campos        = Left (CamposInvalidos linha (length campos))
 lerNumero :: Int -> String -> Either Erro Int
 lerNumero linha campo = maybe (Left (NumeroInvalido linha campo)) Right (readMaybe campo)
 
+removerEspacos :: String -> String
+removerEspacos = dropWhileEnd isSpace . dropWhile isSpace
 
 lerCampeonato :: String -> Either Erro [Partida]
 lerCampeonato texto = do
@@ -72,7 +78,11 @@ todosOsErros texto = lefts lidas ++ timesRepetidos (rights lidas)
 linhasRelevantes :: String -> [(Int, String)]
 linhasRelevantes = filter (relevante . snd) . zip [1 ..] . lines
   where
-    relevante l = not (all isSpace l || take 1 l == "#")
+    relevante linha =
+      case dropWhile isSpace linha of
+        ""      -> False
+        '#' : _ -> False
+        _       -> True
 
 timesRepetidos :: [Partida] -> [Erro]
 timesRepetidos partidas =
@@ -91,7 +101,7 @@ tabelaFormatada linhas =
     linhaDe pos l =
       formatar (show pos) (timeLinha l)
         (map show [pontosLinha l, jogos l, vitorias l, empates l, derrotas l] ++ [comSinal (saldo l)])
-    direita n texto = replicate (n - length texto) ' ' ++ texto
+    direita n texto = replicate (max 0 (n - length texto)) ' ' ++ texto
     comSinal n = if n > 0 then '+' : show n else show n
 
 
@@ -106,3 +116,7 @@ descreverErro (MesmoTime l t) =
   "linha " ++ show l ++ ": " ++ t ++ " nao pode jogar contra si mesmo"
 descreverErro (TimeRepetidoNaRodada r t) =
   "rodada " ++ show r ++ ": " ++ t ++ " joga mais de uma vez"
+descreverErro (RodadaInvalida l r) =
+  "linha " ++ show l ++ ": rodada invalida (" ++ show r ++ ")"
+descreverErro (NomeVazio l) =
+  "linha " ++ show l ++ ": nome de time vazio"
