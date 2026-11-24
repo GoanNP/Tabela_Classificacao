@@ -86,3 +86,17 @@ dadosCampeonato = unlines
   , "7;Cascavel;3;0;Rio Branco"
   , "7;Cianorte;1;0;Azuriz"
   ]
+
+
+-- | Entrada com um erro de cada tipo, para demonstrar a validação.
+dadosComErros :: String
+dadosComErros = unlines
+  [ "# rodada;mandante;gols mandante;gols visitante;visitante"
+  , "1;Coritiba;2;0;Athletico"
+  , "1;Londrina;2;Maringa"
+  , "1;Cascavel;dois;0;Azuriz"
+  , "2;Athletico;1;-1;Londrina"
+  , "2;Parana;0;0;Parana"
+  , ""
+  , "1;Coritiba;1;1;Operario"
+  ]
